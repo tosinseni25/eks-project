@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: eks-project
+  namespace: production
+spec:
+  type: LoadBalancer
+  selector:
+    app: eks-project
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80

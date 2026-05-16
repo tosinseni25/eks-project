@@ -1,0 +1,3 @@
+Application successfully deployed.
+Get the application URL by running:
+  kubectl get svc -n production
