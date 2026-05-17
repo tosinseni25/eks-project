@@ -1,0 +1,67 @@
+name: Build and Deploy to EKS
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER: enterprise-cluster
+  ECR_REPOSITORY: eks-app
+  NAMESPACE: production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker buildx create --use
+        docker buildx build \
+          --platform linux/amd64 \
+          -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+          -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+          --push \
+          .
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig \
+          --name ${{ env.EKS_CLUSTER }} \
+          --region ${{ env.AWS_REGION }}
+
+    - name: Deploy to EKS with Helm
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        helm upgrade --install eks-project ./eks-project \
+          --namespace ${{ env.NAMESPACE }} \
+          --set image.tag=$IMAGE_TAG \
+          --set image.repository=$ECR_REGISTRY/$ECR_REPOSITORY \
+          --rollback-on-failure \
+          --timeout 5m
+
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/eks-project \
+          -n ${{ env.NAMESPACE }} \
+          --timeout=300s
